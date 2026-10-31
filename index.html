@@ -1,0 +1,728 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="theme-color" content="#073b5c">
+<title>CantabriaBus | Transporte público</title>
+
+<style>
+*{box-sizing:border-box}
+body{
+ margin:0;
+ font-family:Arial,Helvetica,sans-serif;
+ background:#f2f5f8;
+ color:#183047
+}
+header{
+ background:linear-gradient(120deg,#073b5c,#087eaa);
+ color:white;
+ padding:28px 18px;
+}
+header h1{margin:0;font-size:30px}
+header p{margin:8px 0 0;color:#d9edf8}
+.container{max-width:1100px;margin:auto;padding:18px}
+.box{
+ background:white;
+ padding:18px;
+ border-radius:14px;
+ margin-bottom:16px;
+ box-shadow:0 3px 12px #0000000b
+}
+input,select,textarea{
+ width:100%;
+ padding:13px;
+ border:1px solid #ccd7e0;
+ border-radius:9px;
+ font-size:16px;
+ margin:7px 0
+}
+button{
+ border:0;
+ padding:11px 15px;
+ border-radius:9px;
+ background:#087eaa;
+ color:white;
+ font-weight:bold;
+ cursor:pointer
+}
+button.secondary{background:#e5edf3;color:#073b5c}
+.tabs{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:15px}
+.tabs button.active{background:#073b5c;color:white}
+.grid{
+ display:grid;
+ grid-template-columns:repeat(auto-fit,minmax(280px,1fr));
+ gap:14px
+}
+.card{
+ border:1px solid #e0e7ed;
+ border-radius:11px;
+ padding:13px;
+ margin:9px 0;
+ background:white
+}
+.card h3{margin:0 0 6px}
+.small{font-size:13px;color:#647789}
+.tag{
+ display:inline-block;
+ background:#e5f3fa;
+ color:#075985;
+ border-radius:20px;
+ padding:4px 9px;
+ font-size:12px
+}
+.row{display:flex;justify-content:space-between;align-items:center;gap:10px}
+.departure{
+ display:flex;
+ justify-content:space-between;
+ align-items:center;
+ border-top:1px solid #e5eaf0;
+ padding:12px 0
+}
+.time{font-size:21px;font-weight:bold;color:#073b5c}
+.hidden{display:none!important}
+#status{
+ background:#e5f3fa;
+ border-radius:10px;
+ padding:13px;
+ margin-bottom:15px;
+ font-size:14px
+}
+#status.error{background:#ffe9e9;color:#9b2222}
+#status.ok{background:#e5f7eb;color:#176536}
+h2{font-size:21px}
+footer{text-align:center;padding:25px;color:#718096;font-size:12px}
+</style>
+</head>
+
+<body>
+
+<header>
+ <h1>🚌 CantabriaBus</h1>
+ <p>Todo el transporte público de Cantabria en un solo lugar.</p>
+</header>
+
+<main class="container">
+
+ <div id="status">Cargando los datos de transporte...</div>
+
+ <section class="box">
+  <h2>🔎 Buscar transporte</h2>
+  <input id="search" placeholder="Busca una parada, localidad o línea...">
+  <p class="small">Puedes buscar por nombre de parada, municipio, operador o número de línea.</p>
+ </section>
+
+ <div class="tabs">
+  <button class="active" data-tab="searchPanel">Buscar</button>
+  <button class="secondary" data-tab="favoritesPanel">⭐ Favoritos</button>
+  <button class="secondary" data-tab="incidentPanel">⚠️ Incidencias</button>
+ </div>
+
+ <section id="searchPanel">
+  <div class="grid">
+   <div class="box">
+    <div class="row">
+     <h2>📍 Paradas</h2>
+     <span id="stopCount" class="tag">0</span>
+    </div>
+    <div id="stops">Cargando...</div>
+   </div>
+
+   <div class="box">
+    <div class="row">
+     <h2>🚌 Líneas</h2>
+     <span id="routeCount" class="tag">0</span>
+    </div>
+    <div id="routes">Cargando...</div>
+   </div>
+  </div>
+ </section>
+
+ <section id="favoritesPanel" class="box hidden">
+  <h2>⭐ Mis paradas favoritas</h2>
+  <div id="favorites">Todavía no tienes favoritos.</div>
+ </section>
+
+ <section id="incidentPanel" class="box hidden">
+  <h2>⚠️ Comunicar una incidencia</h2>
+  <p class="small">Los avisos se guardan en este dispositivo. No se envían a las empresas de transporte.</p>
+
+  <form id="incidentForm">
+   <label>Municipio</label>
+   <input id="town" required>
+
+   <label>Línea o parada</label>
+   <input id="place" required>
+
+   <label>Tipo de incidencia</label>
+   <select id="type">
+    <option>Retraso</option>
+    <option>Cancelación</option>
+    <option>Autobús averiado</option>
+    <option>Problema en una parada</option>
+    <option>Otro</option>
+   </select>
+
+   <label>Descripción</label>
+   <textarea id="description" required></textarea>
+
+   <button>Guardar incidencia</button>
+  </form>
+
+  <h3>Incidencias guardadas</h3>
+  <div id="incidents"></div>
+ </section>
+
+ <section id="detail" class="box hidden"></section>
+
+</main>
+
+<footer>
+ CantabriaBus · Información de horarios programados.
+ Los horarios no representan la ubicación GPS en directo.
+</footer>
+
+<script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
+
+<script>
+const ZIP_FILE = "./20261031_010018_BUS_Cantabria.zip";
+
+let stops=[];
+let routes=[];
+let trips=[];
+let stopTimes=[];
+let calendars=[];
+let calendarDates=[];
+let agencies=[];
+
+let stopMap=new Map();
+let routeMap=new Map();
+let tripMap=new Map();
+let agencyMap=new Map();
+let timesByStop=new Map();
+
+let favorites=JSON.parse(localStorage.getItem("cbFavorites")||"[]");
+let incidents=JSON.parse(localStorage.getItem("cbIncidents")||"[]");
+
+const $=id=>document.getElementById(id);
+
+function status(message,type=""){
+ $("status").className=type;
+ $("status").textContent=message;
+}
+
+function normalize(value){
+ return String(value||"")
+ .normalize("NFD")
+ .replace(/[\u0300-\u036f]/g,"")
+ .toLowerCase();
+}
+
+function escapeHTML(value){
+ return String(value??"").replace(/[&<>"']/g,c=>({
+  "&":"&amp;",
+  "<":"&lt;",
+  ">":"&gt;",
+  '"':"&quot;",
+  "'":"&#39;"
+ }[c]));
+}
+
+function parseCSV(text){
+ const rows=[];
+ let row=[],field="",quoted=false;
+
+ for(let i=0;i<text.length;i++){
+  const c=text[i];
+  const next=text[i+1];
+
+  if(quoted){
+   if(c==='"'&&next==='"'){
+    field+='"';
+    i++;
+   }else if(c==='"'){
+    quoted=false;
+   }else{
+    field+=c;
+   }
+  }else if(c==='"'){
+   quoted=true;
+  }else if(c===","){
+   row.push(field);
+   field="";
+  }else if(c==="\n"){
+   row.push(field);
+   if(row.some(x=>x!==""))rows.push(row);
+   row=[];
+   field="";
+  }else if(c!=="\r"){
+   field+=c;
+  }
+ }
+
+ if(field!==""||row.length){
+  row.push(field);
+  if(row.some(x=>x!==""))rows.push(row);
+ }
+
+ if(!rows.length)return [];
+
+ const headers=rows.shift().map(x=>x.trim());
+
+ return rows.map(r=>{
+  const obj={};
+  headers.forEach((h,i)=>obj[h]=(r[i]??"").trim());
+  return obj;
+ });
+}
+
+async function getTable(zip,name,required=true){
+ const entry=Object.values(zip.files).find(
+  f=>!f.dir&&f.name.split("/").pop()===name
+ );
+
+ if(!entry){
+  if(required)throw new Error("Falta el archivo "+name+" dentro del ZIP.");
+  return [];
+ }
+
+ return parseCSV(await entry.async("string"));
+}
+
+function buildIndexes(){
+ stops.forEach(s=>stopMap.set(s.stop_id,s));
+ routes.forEach(r=>routeMap.set(r.route_id,r));
+ trips.forEach(t=>tripMap.set(t.trip_id,t));
+ agencies.forEach(a=>agencyMap.set(a.agency_id,a));
+
+ stopTimes.forEach(st=>{
+  if(!timesByStop.has(st.stop_id)){
+   timesByStop.set(st.stop_id,[]);
+  }
+  timesByStop.get(st.stop_id).push(st);
+ });
+
+ for(const list of timesByStop.values()){
+  list.sort((a,b)=>Number(a.stop_sequence)-Number(b.stop_sequence));
+ }
+}
+
+function routeName(r){
+ return r ? (r.route_short_name||r.route_long_name||r.route_id) : "Línea";
+}
+
+function timeToSeconds(value){
+ if(!value)return NaN;
+ const p=value.split(":").map(Number);
+ return p[0]*3600+p[1]*60+(p[2]||0);
+}
+
+function formatTime(seconds){
+ const h=Math.floor(seconds/3600)%24;
+ const m=Math.floor((seconds%3600)/60);
+ return String(h).padStart(2,"0")+":"+String(m).padStart(2,"0");
+}
+
+function dateKey(date){
+ return date.getFullYear()+
+ String(date.getMonth()+1).padStart(2,"0")+
+ String(date.getDate()).padStart(2,"0");
+}
+
+function serviceIsActive(serviceId,date){
+ const key=dateKey(date);
+
+ const exceptions=calendarDates.filter(x=>
+  x.service_id===serviceId&&x.date===key
+ );
+
+ if(exceptions.some(x=>x.exception_type==="1"))return true;
+ if(exceptions.some(x=>x.exception_type==="2"))return false;
+
+ const calendar=calendars.find(x=>x.service_id===serviceId);
+
+ if(!calendar)return false;
+ if(key<calendar.start_date||key>calendar.end_date)return false;
+
+ const days=[
+  "sunday","monday","tuesday","wednesday",
+  "thursday","friday","saturday"
+ ];
+
+ return calendar[days[date.getDay()]]==="1";
+}
+
+function activeTripsForDate(date){
+ const activeServices=new Set();
+
+ const services=new Set(trips.map(t=>t.service_id));
+
+ services.forEach(id=>{
+  if(serviceIsActive(id,date))activeServices.add(id);
+ });
+
+ return new Set(
+  trips.filter(t=>activeServices.has(t.service_id))
+  .map(t=>t.trip_id)
+ );
+}
+
+function renderSearch(){
+ const q=normalize($("search").value);
+
+ const matchingStops=stops.filter(s=>{
+  const text=[
+   s.stop_name,
+   s.stop_desc,
+   s.stop_code
+  ].join(" ");
+
+  return !q||normalize(text).includes(q);
+ }).slice(0,40);
+
+ const matchingRoutes=routes.filter(r=>{
+  const agency=agencyMap.get(r.agency_id);
+
+  const text=[
+   r.route_short_name,
+   r.route_long_name,
+   agency?.agency_name
+  ].join(" ");
+
+  return !q||normalize(text).includes(q);
+ }).slice(0,40);
+
+ $("stopCount").textContent=stops.length;
+ $("routeCount").textContent=routes.length;
+
+ $("stops").innerHTML=matchingStops.length
+ ?matchingStops.map(s=>`
+  <div class="card">
+   <h3>📍 ${escapeHTML(s.stop_name)}</h3>
+   <p class="small">${escapeHTML(s.stop_desc||"Cantabria")}</p>
+   <button onclick="openStop('${escapeHTML(s.stop_id)}')">
+    Consultar horarios
+   </button>
+  </div>
+ `).join("")
+ :"<p>No se han encontrado paradas.</p>";
+
+ $("routes").innerHTML=matchingRoutes.length
+ ?matchingRoutes.map(r=>{
+  const agency=agencyMap.get(r.agency_id);
+
+  return `
+   <div class="card">
+    <h3>🚌 ${escapeHTML(routeName(r))}</h3>
+    <p>${escapeHTML(r.route_long_name||"")}</p>
+    <p class="small">${escapeHTML(agency?.agency_name||"")}</p>
+    <button onclick="openRoute('${escapeHTML(r.route_id)}')">
+     Ver recorrido
+    </button>
+   </div>
+  `;
+ }).join("")
+ :"<p>No se han encontrado líneas.</p>";
+}
+
+function getUpcoming(stopId){
+ const now=new Date();
+ const departures=[];
+
+ for(let offset=-1;offset<=0;offset++){
+  const serviceDate=new Date(
+   now.getFullYear(),
+   now.getMonth(),
+   now.getDate()+offset
+  );
+
+  const activeTrips=activeTripsForDate(serviceDate);
+
+  const stopDepartures=timesByStop.get(stopId)||[];
+
+  stopDepartures.forEach(st=>{
+   if(!activeTrips.has(st.trip_id))return;
+
+   const seconds=timeToSeconds(
+    st.departure_time||st.arrival_time
+   );
+
+   if(!Number.isFinite(seconds))return;
+
+   const departureDate=new Date(
+    serviceDate.getFullYear(),
+    serviceDate.getMonth(),
+    serviceDate.getDate()
+   );
+
+   departureDate.setSeconds(seconds);
+
+   if(departureDate>=now&&
+      departureDate-now<24*60*60*1000){
+
+    const trip=tripMap.get(st.trip_id);
+    const route=trip?routeMap.get(trip.route_id):null;
+
+    departures.push({
+     date:departureDate,
+     route:route,
+     trip:trip
+    });
+   }
+  });
+ }
+
+ return departures.sort((a,b)=>a.date-b.date).slice(0,20);
+}
+
+function openStop(id){
+ const stop=stopMap.get(id);
+ if(!stop)return;
+
+ const departures=getUpcoming(id);
+ const favorite=favorites.includes(id);
+
+ let html=`
+  <div class="row">
+   <h2>📍 ${escapeHTML(stop.stop_name)}</h2>
+   <button class="secondary" onclick="toggleFavorite('${escapeHTML(id)}')">
+    ${favorite?"⭐ Guardado":"☆ Favorito"}
+   </button>
+  </div>
+
+  <p class="small">${escapeHTML(stop.stop_desc||"Cantabria")}</p>
+
+  ${stop.stop_lat&&stop.stop_lon?
+   `<p><a target="_blank" rel="noopener" href="https://www.openstreetmap.org/?mlat=${encodeURIComponent(stop.stop_lat)}&mlon=${encodeURIComponent(stop.stop_lon)}#map=17/${encodeURIComponent(stop.stop_lat)}/${encodeURIComponent(stop.stop_lon)}">Ver ubicación en el mapa</a></p>`
+   :""}
+
+  <h3>Próximas salidas programadas</h3>
+ `;
+
+ if(departures.length){
+  departures.forEach(d=>{
+   html+=`
+    <div class="departure">
+     <div>
+      <strong>${escapeHTML(routeName(d.route))}</strong>
+      <div class="small">${escapeHTML(d.trip?.trip_headsign||d.route?.route_long_name||"Destino no indicado")}</div>
+     </div>
+     <div class="time">
+      ${d.date.toLocaleTimeString("es-ES",{hour:"2-digit",minute:"2-digit"})}
+     </div>
+    </div>
+   `;
+  });
+ }else{
+  html+=`
+   <p>No se han encontrado más salidas programadas para las próximas 24 horas.</p>
+  `;
+ }
+
+ html+=`
+  <p class="small">
+   Horarios programados del archivo GTFS. No son estimaciones GPS en directo.
+  </p>
+ `;
+
+ $("detail").innerHTML=html;
+ $("detail").classList.remove("hidden");
+ $("detail").scrollIntoView({behavior:"smooth"});
+}
+
+function openRoute(id){
+ const route=routeMap.get(id);
+ if(!route)return;
+
+ const agency=agencyMap.get(route.agency_id);
+ const routeTrips=trips.filter(t=>t.route_id===id);
+
+ const trip=routeTrips[0];
+
+ let sequence=[];
+
+ if(trip){
+  sequence=stopTimes
+   .filter(st=>st.trip_id===trip.trip_id)
+   .sort((a,b)=>Number(a.stop_sequence)-Number(b.stop_sequence));
+ }
+
+ let html=`
+  <h2>🚌 Línea ${escapeHTML(routeName(route))}</h2>
+  <p>${escapeHTML(route.route_long_name||"")}</p>
+  <p class="small">Operador: ${escapeHTML(agency?.agency_name||"No indicado")}</p>
+  <p class="small">${routeTrips.length} viajes incluidos en el archivo.</p>
+  <h3>Paradas de un recorrido de referencia</h3>
+ `;
+
+ if(sequence.length){
+  sequence.forEach(st=>{
+   const stop=stopMap.get(st.stop_id);
+
+   html+=`
+    <div class="departure">
+     <span>${escapeHTML(stop?.stop_name||st.stop_id)}</span>
+     <strong>${escapeHTML(st.departure_time||st.arrival_time||"")}</strong>
+    </div>
+   `;
+  });
+ }else{
+  html+="<p>No se ha encontrado un recorrido para esta línea.</p>";
+ }
+
+ html+=`
+  <p class="small">
+   Se muestra un viaje de referencia. Puede haber variantes y recorridos diferentes.
+  </p>
+ `;
+
+ $("detail").innerHTML=html;
+ $("detail").classList.remove("hidden");
+ $("detail").scrollIntoView({behavior:"smooth"});
+}
+
+function toggleFavorite(id){
+ favorites=favorites.includes(id)
+  ?favorites.filter(x=>x!==id)
+  :[...favorites,id];
+
+ localStorage.setItem("cbFavorites",JSON.stringify(favorites));
+
+ renderFavorites();
+ openStop(id);
+}
+
+function renderFavorites(){
+ const list=favorites.map(id=>stopMap.get(id)).filter(Boolean);
+
+ $("favorites").innerHTML=list.length
+ ?list.map(s=>`
+  <div class="card">
+   <h3>${escapeHTML(s.stop_name)}</h3>
+   <button onclick="openStop('${escapeHTML(s.stop_id)}')">
+    Consultar horarios
+   </button>
+  </div>
+ `).join("")
+ :"<p>Todavía no tienes paradas favoritas.</p>";
+}
+
+function renderIncidents(){
+ $("incidents").innerHTML=incidents.length
+ ?incidents.map(x=>`
+  <div class="card">
+   <span class="tag">${escapeHTML(x.type)}</span>
+   <h3>${escapeHTML(x.town)}</h3>
+   <p>${escapeHTML(x.place)}</p>
+   <p>${escapeHTML(x.description)}</p>
+   <p class="small">${escapeHTML(x.date)}</p>
+  </div>
+ `).join("")
+ :"<p>No hay incidencias guardadas.</p>";
+}
+
+async function loadData(){
+ try{
+  status("Descargando los datos oficiales...");
+
+  if(typeof JSZip==="undefined"){
+   throw new Error("No se ha podido cargar el lector ZIP. Comprueba tu conexión.");
+  }
+
+  const response=await fetch(ZIP_FILE);
+
+  if(!response.ok){
+   throw new Error(
+    "No se encuentra el ZIP. Comprueba que está junto a index.html y que su nombre es exactamente: "+ZIP_FILE
+   );
+  }
+
+  const zip=await JSZip.loadAsync(await response.arrayBuffer());
+
+  [
+   stops,
+   routes,
+   trips,
+   stopTimes,
+   calendars,
+   calendarDates,
+   agencies
+  ]=await Promise.all([
+   getTable(zip,"stops.txt"),
+   getTable(zip,"routes.txt"),
+   getTable(zip,"trips.txt"),
+   getTable(zip,"stop_times.txt"),
+   getTable(zip,"calendar.txt",false),
+   getTable(zip,"calendar_dates.txt",false),
+   getTable(zip,"agency.txt",false)
+  ]);
+
+  if(!calendars.length&&!calendarDates.length){
+   throw new Error("El archivo no contiene calendarios de servicio.");
+  }
+
+  buildIndexes();
+
+  renderSearch();
+  renderFavorites();
+  renderIncidents();
+
+  status(
+   "Datos cargados correctamente: "+
+   stops.length+" paradas, "+
+   routes.length+" líneas y "+
+   trips.length+" viajes programados.",
+   "ok"
+  );
+
+ }catch(error){
+  console.error(error);
+
+  status("Error al cargar los datos: "+error.message,"error");
+ }
+}
+
+$("search").addEventListener("input",renderSearch);
+
+document.querySelectorAll("[data-tab]").forEach(button=>{
+ button.addEventListener("click",()=>{
+  document.querySelectorAll("[data-tab]").forEach(b=>{
+   b.classList.remove("active");
+   b.classList.add("secondary");
+  });
+
+  button.classList.add("active");
+  button.classList.remove("secondary");
+
+  ["searchPanel","favoritesPanel","incidentPanel"].forEach(id=>{
+   $(id).classList.toggle("hidden",id!==button.dataset.tab);
+  });
+
+  $("detail").classList.add("hidden");
+ });
+});
+
+$("incidentForm").addEventListener("submit",event=>{
+ event.preventDefault();
+
+ incidents.unshift({
+  town:$("town").value,
+  place:$("place").value,
+  type:$("type").value,
+  description:$("description").value,
+  date:new Date().toLocaleString("es-ES")
+ });
+
+ localStorage.setItem("cbIncidents",JSON.stringify(incidents));
+
+ event.target.reset();
+ renderIncidents();
+
+ alert("Incidencia guardada en este dispositivo.");
+});
+
+loadData();
+</script>
+
+</body>
+</html>
